@@ -1,11 +1,17 @@
-# Alfa-Pyme — Document Viewer + Drag & Drop MVP
+# Alfa-Pyme CSV + History + Copilot + Retry MVP
 
-Agrega:
-- Drag & drop multiupload.
-- Upload múltiple.
-- Visor PDF/imagen con signed URL.
-- Panel de extracción/confianza.
-- Integración con checklist.
-- Mantiene Output Engine.
+Reemplaza en GitHub:
+- `src/`
+- `package.json`
+- `index.html`
+- `README.md`
 
-Usa el mismo Supabase ya inicializado con `alfapyme_full_bootstrap.sql`.
+Ejecuta en Supabase:
+- `supabase/ops_incremental.sql`
+
+Incluye:
+- CSV descargable real desde batches.
+- Historial visible por expediente.
+- Copilot cockpit operacional.
+- Retry logic visual.
+- Botón explícito de subida.
