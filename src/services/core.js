@@ -1,52 +1,24 @@
 import { supabase } from '../lib/supabase'
 const BUCKET='case-documents'
-
 export async function fetchCases(){const{data,error}=await supabase.from('cases').select('*').order('created_at',{ascending:false});if(error)throw error;return data||[]}
 export async function fetchDocuments(caseId){const{data,error}=await supabase.from('documents').select('*').eq('case_id',caseId).order('created_at',{ascending:false});if(error)throw error;return data||[]}
 export async function fetchChecklist(caseId){const{data,error}=await supabase.from('case_document_checklist').select('*').eq('case_id',caseId).order('document_label');if(error)throw error;return data||[]}
 export async function updateChecklist(id,payload){const{data,error}=await supabase.from('case_document_checklist').update({...payload,updated_at:new Date().toISOString()}).eq('id',id).select().single();if(error)throw error;return data}
-export async function updateCaseStatus(caseId,status){const{data,error}=await supabase.from('cases').update({status,updated_at:new Date().toISOString()}).eq('id',caseId).select().single();if(error)throw error;return data}
-
-export async function getDocumentSignedUrl(doc){
-  if(!doc?.storage_path)return null
-  const {data,error}=await supabase.storage.from(BUCKET).createSignedUrl(doc.storage_path,3600)
-  if(error)throw error
-  return data?.signedUrl
-}
-
-export async function uploadDocument({caseId,organizationId,file}){
-  const name=file.name.replace(/[^a-zA-Z0-9._-]/g,'_')
-  const path=`${caseId}/${Date.now()}-${name}`
-  const up=await supabase.storage.from(BUCKET).upload(path,file,{upsert:false})
-  if(up.error)throw up.error
-  const docType=detectDocType(file.name)
-  const conf=docType==='documento_trafico'?0.72:0.88
-  const {data,error}=await supabase.from('documents').insert({
-    case_id:caseId,organization_id:organizationId,file_name:file.name,file_type:file.type||'application/octet-stream',
-    source_channel:'manual',storage_path:path,status:'ai_extracted',document_type:docType,confidence:conf,
-    ocr_text:`OCR simulado para ${file.name}`,ai_payload:{engine:'tyrion_simulado',document_type:docType,confidence:conf,warnings: conf<0.85?['Clasificación de baja confianza. Requiere revisión.']:[]}
-  }).select().single()
-  if(error)throw error
-  await supabase.rpc('sync_document_to_checklist',{p_document_id:data.id})
-  return data
-}
-function detectDocType(n=''){
-  n=n.toLowerCase()
-  if(n.includes('dni')&&n.includes('compr'))return'dni_comprador'
-  if(n.includes('dni')&&n.includes('vend'))return'dni_vendedor'
-  if(n.includes('permiso'))return'permiso_circulacion'
-  if(n.includes('ficha'))return'ficha_tecnica'
-  if(n.includes('factura')||n.includes('contrato'))return'contrato_factura'
-  if(n.includes('pago')||n.includes('tasa')||n.includes('justificante'))return'justificante_pago'
-  if(n.includes('mandato')||n.includes('autorizacion'))return'mandato_gestoria'
-  if(n.includes('solicitud')&&n.includes('baja'))return'solicitud_baja'
-  if(n.includes('duplicado'))return'solicitud_duplicado'
-  return'documento_trafico'
-}
-
+export async function updateCaseStatus(caseId,status){const{data,error}=await supabase.from('cases').update({status,updated_at:new Date().toISOString()}).eq('id',caseId).select().single();if(error)throw error;await logEvent({caseId,action:'case_status_changed',entityType:'case',entityId:caseId,metadata:{status}});return data}
+export async function getDocumentSignedUrl(doc){if(!doc?.storage_path)return null;const{data,error}=await supabase.storage.from(BUCKET).createSignedUrl(doc.storage_path,3600);if(error)throw error;return data?.signedUrl}
+export async function uploadDocument({caseId,organizationId,file}){const name=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');const path=`${caseId}/${Date.now()}-${name}`;const up=await supabase.storage.from(BUCKET).upload(path,file,{upsert:false});if(up.error)throw up.error;const docType=detectDocType(file.name);const conf=docType==='documento_trafico'?0.72:0.88;const{data,error}=await supabase.from('documents').insert({case_id:caseId,organization_id:organizationId,file_name:file.name,file_type:file.type||'application/octet-stream',source_channel:'manual',storage_path:path,status:'ai_extracted',document_type:docType,confidence:conf,ocr_text:`OCR simulado para ${file.name}`,ai_payload:{engine:'tyrion_simulado',document_type:docType,confidence:conf}}).select().single();if(error)throw error;await supabase.rpc('sync_document_to_checklist',{p_document_id:data.id});await logEvent({organizationId,caseId,documentId:data.id,action:'document_uploaded',entityType:'document',entityId:data.id,metadata:{file_name:file.name,document_type:docType,confidence:conf}});return data}
+function detectDocType(n=''){n=n.toLowerCase();if(n.includes('dni')&&n.includes('compr'))return'dni_comprador';if(n.includes('dni')&&n.includes('vend'))return'dni_vendedor';if(n.includes('permiso'))return'permiso_circulacion';if(n.includes('ficha'))return'ficha_tecnica';if(n.includes('factura')||n.includes('contrato'))return'contrato_factura';if(n.includes('pago')||n.includes('tasa')||n.includes('justificante'))return'justificante_pago';if(n.includes('mandato')||n.includes('autorizacion'))return'mandato_gestoria';if(n.includes('solicitud')&&n.includes('baja'))return'solicitud_baja';if(n.includes('duplicado'))return'solicitud_duplicado';return'documento_trafico'}
 export async function fetchOutputQueue(){const{data,error}=await supabase.from('output_queue').select('*, cases(public_id, client_name, vehicle_plate, status)').order('created_at',{ascending:false});if(error)throw error;return data||[]}
 export async function fetchOutputBatches(){const{data,error}=await supabase.from('output_batches').select('*').order('created_at',{ascending:false});if(error)throw error;return data||[]}
+export async function fetchBatchCases(batchId){const{data,error}=await supabase.from('output_batch_cases').select('*, cases(public_id, client_name, vehicle_plate, case_type)').eq('batch_id',batchId).order('created_at');if(error)throw error;return data||[]}
 export async function fetchOutputSessions(){const{data,error}=await supabase.from('output_sessions').select('*').order('created_at',{ascending:false});if(error)throw error;return data||[]}
+export async function fetchSessionCases(sessionId){const{data,error}=await supabase.from('output_session_cases').select('*, cases(public_id, client_name, vehicle_plate, case_type, status)').eq('session_id',sessionId).order('created_at');if(error)throw error;return data||[]}
 export async function fetchOutputJobs(){const{data,error}=await supabase.from('output_jobs').select('*').order('created_at',{ascending:false});if(error)throw error;return data||[]}
 export async function fetchOutputStrategies(){const{data,error}=await supabase.from('output_strategies').select('*').order('case_type');if(error)throw error;return data||[]}
 export async function processOutputQueue(){const{data,error}=await supabase.rpc('process_output_queue');if(error)throw error;return data}
+export async function fetchCaseHistory(caseId){const{data,error}=await supabase.from('audit_logs').select('*').eq('case_id',caseId).order('created_at',{ascending:false});if(error)throw error;return data||[]}
+export async function logEvent({organizationId=null,caseId,documentId=null,action,entityType,entityId,metadata={}}){try{await supabase.from('audit_logs').insert({organization_id:organizationId,case_id:caseId,document_id:documentId,action,entity_type:entityType,entity_id:entityId,metadata})}catch(e){console.warn(e)}}
+export async function updateSessionCase(id,payload){const{data,error}=await supabase.from('output_session_cases').update(payload).eq('id',id).select().single();if(error)throw error;return data}
+export async function updateOutputJob(id,payload){const{data,error}=await supabase.from('output_jobs').update({...payload,updated_at:new Date().toISOString()}).eq('id',id).select().single();if(error)throw error;return data}
+export async function retryFailedJobs(){const{data,error}=await supabase.rpc('retry_failed_jobs');if(error)throw error;return data}
+export async function downloadBatchCsv(batch){const rows=await fetchBatchCases(batch.id);const lines=[['expediente','cliente','matricula','tramite','estado_batch'],...rows.map(r=>[r.cases?.public_id||'',r.cases?.client_name||'',r.cases?.vehicle_plate||'',r.cases?.case_type||'',r.status||''])];const csv=lines.map(row=>row.map(v=>`"${String(v).replaceAll('"','""')}"`).join(';')).join('\\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=batch.file_name||`batch_${batch.case_type||'export'}.csv`;a.click();URL.revokeObjectURL(url);await supabase.from('output_batches').update({status:'exported',executed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq('id',batch.id);return rows.length}
